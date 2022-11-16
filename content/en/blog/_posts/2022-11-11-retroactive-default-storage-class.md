@@ -7,7 +7,7 @@ slug: retroactive-default-storage-class
 
 **Author:** Roman Bednář (Red Hat)
 
-In Kubernetes 1.25 a new Alpha feature was introduced to improve the way default StorageClass is assigned to a PVC. It is no longer required to create a default StorageClass first and PVC second in order to assign the class and any PVCs without StorageClass can be updated later. The feature will be GA in Kubernetes 1.28.
+In Kubernetes 1.25 a new Alpha feature was introduced to improve the way default StorageClass is assigned to a PersistentVolumeClaim (PVC). It is no longer required to create a default StorageClass first and PVC second in order to assign the class and any PVCs without StorageClass can be updated later. The feature will be Beta in Kubernetes 1.26.
 
 See [Official Kubernetes documentation](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#retroactive-default-storageclass-assignment) for more details.
 
@@ -20,7 +20,7 @@ But what if there was no default StorageClass at the time of PVC creation? Users
 ### Changing default StorageClass did not have a good solution
 
    There are two options admins had when they wanted to change default StorageClass:
-   1. Creating the new StorageClass as default before removing the old one which results in having two defaults for a short period of time. If a user creates a PersistentVolumeClaim with storageClassName set to `nil` (which means default StorageClass) they will get an error since this does not pass admission check. This approach is not recommended and might be prevented in future releases. Currently (1.26), admins get an alert only if there is more than one default StorageClass.
+   1. Creating the new StorageClass as default before removing the old one which results in having two defaults for a short period of time. If a user creates a PersistentVolumeClaim at this point with storageClassName set to `nil` (which means default StorageClass) Kubernetes 1.26+ will choose the newest default StorageClass and assign it to this PVC.
 
 
    2. Remove the old default first and create new default StorageClass which results in having no default for a short period of time. If user creates a PersistentVolumeClaim with storageClassName set to `nil` (which means default StorageClass) the PVC will be in `Pending` state forever, then user has to fix this by deleting the PVC a creating it again once default StorageClass is available.
@@ -33,7 +33,7 @@ If cluster installation tool needs to create resources that require storage (e.g
 
 ## What changed
 
-We've changed PV controller in KCM, so it can assign default StorageClass to unbound PersistentVolumeClaims that have storageClassName set to `nil`. In order to allow the value change PersistentVolumeClaim admission in the API server also changed to allow changing the value from `nil` to actual StorageClass name.
+We've changed PersistentVolume (PV) controller in KCM, so it can assign default StorageClass to unbound PersistentVolumeClaims that have storageClassName set to `nil`. In order to allow the value change PersistentVolumeClaim admission in the API server also changed to allow changing the value from `nil` to actual StorageClass name.
 
 ### `nil` vs `""` for storageClassName - does it matter?
 
@@ -43,18 +43,20 @@ With this new feature enabled we wanted to maintain this behavior but also be ab
 
 In other words we need to distinguish two main cases, either default StorageClass is not present in which case there's no behavior change or where there is a default in which case PVCs with `nil` won't bind to PVs anymore and instead will be updated to have the StorageClass.
 
-The tables below show all these cases to better describe when PVC binds and when it's StorageClass gets updated:
+The tables below show all these cases to better describe when PVC binds and when it's StorageClass gets updated.
 
-| Without default class | PVC `""`   | PVC `nil` |
-|-----------------------|------------|-----------|
-| PV `""`               | Binds      | Binds     |
-| PV `nil`              | Binds      | Binds     |
+| Without default class        | PVC storageClassName == `""` | PVC storageClassName == `nil` |
+|------------------------------|------------------------------|-------------------------------|
+| PV storageClassName == `""`  | binds                        | binds                         |
+| PV without storageClassName  | binds                        | binds                         |
 
 
-| With default class | PVC `""`   | PVC `nil`     |
-|--------------------|------------|---------------|
-| PV `""`            | Binds      | Class updates |
-| PV `nil`           | Binds      | Class updates |
+| With default class          | PVC storageClassName == `""` | PVC storageClassName == `nil` |
+|-----------------------------|------------------------------|-------------------------------|
+| PV storageClassName == `""` | binds                        | class updates                 |
+| PV without storageClassName | binds                        | class updates                 |
+
+> NOTE: `storageClassName` with `nil` value in PVC spec is equal to omitting the `storageClassName` in the spec.
 
 
 ## How to use it
